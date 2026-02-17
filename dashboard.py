@@ -180,6 +180,28 @@ with col4:
 with col5:
     st.metric("🌆 Cities", filtered[filtered['location'] != 'Unknown']['location'].nunique())
 
+
+# Add CSS for glassy grey line
+st.markdown("""
+<style>
+.glassy-grey-line {
+    width: 96vw;
+    max-width: 1500px;
+    height: 9px;
+    margin: 0 auto 18px auto;
+    border-radius: 8px;
+    background: rgba(200, 200, 210, 0.32);
+    box-shadow: 0 2px 12px 0 rgba(180,180,200,0.18), 0 1.5px 0 rgba(255,255,255,0.18) inset;
+    backdrop-filter: blur(6px);
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Glassy grey line above Job Distribution
+st.markdown("""
+<div class='glassy-grey-line'></div>
+""", unsafe_allow_html=True)
+
 st.markdown("---")
 
 # ══════════════════════════════════════════════════════════════
@@ -538,6 +560,11 @@ with tab5:
             st.info("No valid timestamp data available for time series analysis.")
     else:
         st.info("Timestamp data not available in the dataset.")
+
+# Glassy grey line below Advanced EDA section
+st.markdown("""
+<div class='glassy-grey-line'></div>
+""", unsafe_allow_html=True)
 
 st.markdown("---")
 
