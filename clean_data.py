@@ -17,6 +17,8 @@ import sqlite3
 import re
 from datetime import datetime
 
+from database import load_raw_chunks
+
 DB_PATH = "jobs.db"
 
 
@@ -94,79 +96,100 @@ def standardize_job_level(level_str):
 
 
 # ══════════════════════════════════════════════════════════════
+#  CHUNK CLEANING HELPERS
+#  These functions clean one chunk of raw data at a time.
+#  Used by clean_and_merge() during chunked/lazy loading.
+# ══════════════════════════════════════════════════════════════
+
+def _clean_merojob_chunk(mero):
+    """Cleans a single chunk (DataFrame) of raw MeroJob data."""
+    mero_clean = pd.DataFrame(index=mero.index)
+    mero_clean['source']      = 'merojob'
+    mero_clean['job_id']      = 'mj_' + mero['id'].astype(str)
+    mero_clean['title']       = mero['title'].str.strip().str.title()
+    mero_clean['company']     = mero['company'].str.strip().fillna('Unknown Company')
+    mero_clean['location']    = mero['location'].apply(clean_location)
+    mero_clean['category']    = mero['categories'].fillna('Unknown').replace('', 'Unknown')
+    mero_clean['job_level']   = mero['job_level'].apply(standardize_job_level)
+    mero_clean['skills']      = mero['skills'].fillna('')
+    mero_clean['salary_min']  = pd.to_numeric(mero['salary_min'], errors='coerce')
+    mero_clean['salary_max']  = pd.to_numeric(mero['salary_max'], errors='coerce')
+    mero_clean['currency']    = mero['currency'].fillna('NPR')
+    mero_clean['deadline']    = pd.to_datetime(mero['deadline'], errors='coerce')
+    mero_clean['scraped_at']  = pd.to_datetime(mero['scraped_at'], errors='coerce')
+    mero_clean['job_url']     = mero['job_url']
+    mero_clean['experience']  = 'N/A'   # MeroJob API doesn't return this field
+    mero_clean['education']   = 'N/A'
+    return mero_clean
+
+
+def _clean_kumari_chunk(kumari):
+    """Cleans a single chunk (DataFrame) of raw KumariJob data."""
+    kumari_clean = pd.DataFrame(index=kumari.index)
+    kumari_clean['source']      = 'kumarijob'
+    kumari_clean['job_id']      = 'kj_' + kumari['job_id'].astype(str)
+    kumari_clean['title']       = kumari['job_title'].str.strip().str.title()
+    kumari_clean['company']     = kumari['company'].str.strip().fillna('Unknown Company')
+    kumari_clean['location']    = 'Kathmandu'  # KumariJob is primarily KTM-based
+    kumari_clean['category']    = kumari['industry'].fillna('Unknown').replace('', 'Unknown')
+    kumari_clean['job_level']   = kumari['job_level'].apply(standardize_job_level)
+    kumari_clean['skills']      = ''
+    kumari_clean['salary_min']  = kumari['salary'].apply(extract_salary_min)
+    kumari_clean['salary_max']  = kumari['salary'].apply(extract_salary_max)
+    kumari_clean['currency']    = 'NPR'
+    kumari_clean['deadline']    = pd.NaT
+    kumari_clean['scraped_at']  = pd.to_datetime(kumari['scraped_at'], errors='coerce')
+    kumari_clean['job_url']     = kumari['link']
+    kumari_clean['experience']  = kumari['experience'].fillna('N/A')
+    kumari_clean['education']   = kumari['education'].fillna('N/A')
+    return kumari_clean
+
+
+# ══════════════════════════════════════════════════════════════
 #  MAIN CLEANING FUNCTION
 # ══════════════════════════════════════════════════════════════
 
 def clean_and_merge():
     """
-    Main function: loads raw data → cleans → merges → saves jobs_clean table.
+    Main function: loads raw data in chunks → cleans each chunk →
+    merges all chunks → saves jobs_clean table.
+
+    Uses generator-based chunked loading (database.load_raw_chunks)
+    to demonstrate lazy evaluation: only one chunk of raw data is
+    held in memory at a time during the loading/cleaning phase.
+    Each chunk is cleaned immediately before the next is fetched.
+
     Returns the cleaned DataFrame.
     """
-    conn = sqlite3.connect(DB_PATH)
-
-    # ── Load raw tables ────────────────────────────────────────
-    try:
-        mero = pd.read_sql("SELECT * FROM merojob_raw", conn)
-        print(f"  Loaded {len(mero)} raw MeroJob rows")
-    except Exception as e:
-        print(f"  Could not load merojob_raw: {e}")
-        mero = pd.DataFrame()
-
-    try:
-        kumari = pd.read_sql("SELECT * FROM kumari_raw", conn)
-        print(f"  Loaded {len(kumari)} raw KumariJob rows")
-    except Exception as e:
-        print(f"  Could not load kumari_raw: {e}")
-        kumari = pd.DataFrame()
-
     cleaned_frames = []
 
-    # ── Process MeroJob data ───────────────────────────────────
-    if len(mero) > 0:
-        mero_clean = pd.DataFrame()
-        mero_clean['source']      = 'merojob'
-        mero_clean['job_id']      = 'mj_' + mero['id'].astype(str)
-        mero_clean['title']       = mero['title'].str.strip().str.title()
-        mero_clean['company']     = mero['company'].str.strip().fillna('Unknown Company')
-        mero_clean['location']    = mero['location'].apply(clean_location)
-        mero_clean['category']    = mero['categories'].fillna('Unknown').replace('', 'Unknown')
-        mero_clean['job_level']   = mero['job_level'].apply(standardize_job_level)
-        mero_clean['skills']      = mero['skills'].fillna('')
-        mero_clean['salary_min']  = pd.to_numeric(mero['salary_min'], errors='coerce')
-        mero_clean['salary_max']  = pd.to_numeric(mero['salary_max'], errors='coerce')
-        mero_clean['currency']    = mero['currency'].fillna('NPR')
-        mero_clean['deadline']    = pd.to_datetime(mero['deadline'], errors='coerce')
-        mero_clean['scraped_at']  = pd.to_datetime(mero['scraped_at'], errors='coerce')
-        mero_clean['job_url']     = mero['job_url']
-        mero_clean['experience']  = 'N/A'   # MeroJob API doesn't return this field
-        mero_clean['education']   = 'N/A'
-        cleaned_frames.append(mero_clean)
+    # ── Load & clean MeroJob data in chunks (lazy evaluation) ──
+    #    The generator yields one chunk at a time — only that chunk
+    #    is in memory, not the entire merojob_raw table.
+    print("  Loading MeroJob data in chunks (lazy evaluation)...")
+    mero_chunk_count = 0
+    mero_row_count   = 0
+    for chunk in load_raw_chunks("merojob_raw", chunk_size=50):
+        cleaned_chunk = _clean_merojob_chunk(chunk)
+        cleaned_frames.append(cleaned_chunk)
+        mero_chunk_count += 1
+        mero_row_count   += len(chunk)
+    print(f"  Processed {mero_row_count} MeroJob rows across {mero_chunk_count} chunks")
 
-    # ── Process KumariJob data ─────────────────────────────────
-    if len(kumari) > 0:
-        kumari_clean = pd.DataFrame()
-        kumari_clean['source']      = 'kumarijob'
-        kumari_clean['job_id']      = 'kj_' + kumari['job_id'].astype(str)
-        kumari_clean['title']       = kumari['job_title'].str.strip().str.title()
-        kumari_clean['company']     = kumari['company'].str.strip().fillna('Unknown Company')
-        kumari_clean['location']    = 'Kathmandu'  # KumariJob is primarily KTM-based
-        kumari_clean['category']    = kumari['industry'].fillna('Unknown').replace('', 'Unknown')
-        kumari_clean['job_level']   = kumari['job_level'].apply(standardize_job_level)
-        kumari_clean['skills']      = ''
-        kumari_clean['salary_min']  = kumari['salary'].apply(extract_salary_min)
-        kumari_clean['salary_max']  = kumari['salary'].apply(extract_salary_max)
-        kumari_clean['currency']    = 'NPR'
-        kumari_clean['deadline']    = pd.NaT
-        kumari_clean['scraped_at']  = pd.to_datetime(kumari['scraped_at'], errors='coerce')
-        kumari_clean['job_url']     = kumari['link']
-        kumari_clean['experience']  = kumari['experience'].fillna('N/A')
-        kumari_clean['education']   = kumari['education'].fillna('N/A')
-        cleaned_frames.append(kumari_clean)
+    # ── Load & clean KumariJob data in chunks (lazy evaluation) ─
+    print("  Loading KumariJob data in chunks (lazy evaluation)...")
+    kumari_chunk_count = 0
+    kumari_row_count   = 0
+    for chunk in load_raw_chunks("kumari_raw", chunk_size=50):
+        cleaned_chunk = _clean_kumari_chunk(chunk)
+        cleaned_frames.append(cleaned_chunk)
+        kumari_chunk_count += 1
+        kumari_row_count   += len(chunk)
+    print(f"  Processed {kumari_row_count} KumariJob rows across {kumari_chunk_count} chunks")
 
     # ── Handle the case where both tables are empty ────────────
     if not cleaned_frames:
         print("⚠️  No raw data found. Run the scrapers first!")
-        conn.close()
         return pd.DataFrame()
 
     # ── Merge both sources ─────────────────────────────────────
@@ -199,6 +222,7 @@ def clean_and_merge():
     df['scraped_at'] = df['scraped_at'].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if pd.notna(x) else '')
 
     # ── Save cleaned data to database ─────────────────────────
+    conn = sqlite3.connect(DB_PATH)
     df.to_sql('jobs_clean', conn, if_exists='replace', index=False)
     conn.close()
 
