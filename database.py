@@ -140,6 +140,59 @@ def load_clean_jobs():
     return df
 
 
+# ══════════════════════════════════════════════════════════════
+#  GENERATOR: load_raw_chunks
+#  Lazily yields chunks of rows from a raw table using a
+#  generator. Demonstrates chunking and lazy evaluation —
+#  only one chunk is held in memory at any time.
+#  (Chapter 1.3 — Generators for memory-efficient data streaming)
+# ══════════════════════════════════════════════════════════════
+
+# Whitelist of valid raw table names (prevents SQL injection)
+VALID_RAW_TABLES = {"merojob_raw", "kumari_raw"}
+
+
+def load_raw_chunks(table_name, chunk_size=50):
+    """
+    Generator that lazily yields chunks of raw data from the database.
+
+    Instead of loading the entire table into memory with a single
+    pd.read_sql() call, this function uses the `chunksize` parameter
+    to create an iterator that fetches `chunk_size` rows at a time.
+    Each call to next() on the iterator executes a partial read —
+    this is lazy evaluation.
+
+    Args:
+        table_name (str): Name of the raw table (merojob_raw or kumari_raw).
+        chunk_size (int): Number of rows per chunk (default: 50).
+
+    Yields:
+        pd.DataFrame: A chunk of rows from the table.
+
+    Example:
+        for chunk in load_raw_chunks("merojob_raw", chunk_size=50):
+            process(chunk)   # only 50 rows in memory at a time
+    """
+    if table_name not in VALID_RAW_TABLES:
+        print(f"  ⚠️  Invalid table name: {table_name}")
+        return
+
+    conn = get_connection()
+    try:
+        # pd.read_sql with chunksize returns a generator (lazy iterator)
+        # — it does NOT load the full table; rows are fetched on demand.
+        chunk_iter = pd.read_sql(
+            f"SELECT * FROM {table_name}", conn, chunksize=chunk_size
+        )
+        for chunk_num, chunk in enumerate(chunk_iter, 1):
+            print(f"    [CHUNK] {table_name} chunk {chunk_num}: {len(chunk)} rows")
+            yield chunk
+    except Exception as e:
+        print(f"  Could not load {table_name}: {e}")
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     setup_database()
     print("Database initialized successfully.")
