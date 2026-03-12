@@ -2,6 +2,7 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
+
 DB_PATH = "jobs.db"
 
 def get_connection():
