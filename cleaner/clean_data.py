@@ -17,7 +17,7 @@ import sqlite3
 import re
 from datetime import datetime
 
-from database import load_raw_chunks
+from .database import load_raw_chunks
 
 DB_PATH = "jobs.db"
 
@@ -94,7 +94,59 @@ def standardize_job_level(level_str):
     else:
         return level_str.strip().title()
 
-
+def _extract_district(loc):
+  
+    """Standardizes various location strings by extracting the district or major city."""
+    NEPAL_DISTRICTS = [
+    # --- Koshi Province ---
+    "Bhojpur", "Dhankuta", "Ilam", "Jhapa", "Khotang", "Morang", "Okhaldhunga", 
+    "Panchthar", "Sankhuwasabha", "Solukhumbu", "Sunsari", "Taplejung", "Terhathum", "Udayapur",
+    
+    # --- Madhesh Province ---
+    "Bara", "Dhanusha", "Mahottari", "Parsa", "Rautahat", "Saptari", "Sarlahi", "Siraha",
+    
+    # --- Bagmati Province ---
+    "Bhaktapur", "Chitwan", "Dhading", "Dolakha", "Kathmandu", "Kavrepalanchok", 
+    "Lalitpur", "Makwanpur", "Nuwakot", "Ramechhap", "Rasuwa", "Sindhuli", "Sindhupalchok",
+    
+    # --- Gandaki Province ---
+    "Baglung", "Gorkha", "Kaski", "Lamjung", "Manang", "Mustang", "Myagdi", 
+    "Nawalpur", "Parbat", "Syangja", "Tanahun",
+    
+    # --- Lumbini Province ---
+    "Arghakhanchi", "Banke", "Bardiya", "Dang", "Eastern Rukum", "Gulmi", "Kapilvastu", 
+    "Parasi", "Palpa", "Pyuthan", "Rolpa", "Rupandehi",
+    
+    # --- Karnali Province ---
+    "Dailekh", "Dolpa", "Humla", "Jajarkot", "Jumla", "Kalikot", "Mugu", 
+    "Salyan", "Surkhet", "Western Rukum",
+    
+    # --- Sudurpashchim Province ---
+    "Achham", "Baitadi", "Bajhang", "Bajura", "Dadeldhura", "Darchula", "Doti", 
+    "Kailali", "Kanchanpur",
+    
+    # --- Legacy / Broad Names (often used in job descriptions) ---
+    "Nawalparasi", "Rukum",
+    
+    # --- Major Cities / Common Job Hubs ---
+    "Pokhara", "Biratnagar", "Birgunj", "Dharan", "Bharatpur", "Janakpur", 
+    "Hetauda", "Nepalgunj", "Itahari", "Butwal", "Bhairahawa", "Birtamode", 
+    "Dhangadhi", "Tulsipur", "Ghorahi", "Banepa", "Dhulikhel", "Lazimpat", 
+    "Baneshwor", "Patan"
+]
+    if not isinstance(loc, str):
+        return 'Unknown'
+        
+    loc = loc.strip()
+    loc_lower = loc.lower()
+    
+    # Iterate through our known list to see if any district is mentioned in the string
+    for district in NEPAL_DISTRICTS:
+        if district.lower() in loc_lower:
+            return district # Returns the cleanly capitalized version from our list
+            
+    # If no district is found, return the original location (or you can change this to return 'Unknown')
+    return loc
 # ══════════════════════════════════════════════════════════════
 #  CHUNK CLEANING HELPERS
 #  These functions clean one chunk of raw data at a time.
@@ -109,6 +161,7 @@ def _clean_merojob_chunk(mero):
     mero_clean['title']       = mero['title'].str.strip().str.title()
     mero_clean['company']     = mero['company'].str.strip().fillna('Unknown Company')
     mero_clean['location']    = mero['location'].apply(clean_location)
+    mero_clean['location']    = mero_clean['location'].apply(_extract_district)  # Standardize Kathmandu variations
     mero_clean['category']    = mero['categories'].fillna('Unknown').replace('', 'Unknown')
     mero_clean['job_level']   = mero['job_level'].apply(standardize_job_level)
     mero_clean['skills']      = mero['skills'].fillna('')
@@ -143,6 +196,7 @@ def _clean_kumari_chunk(kumari):
     kumari_clean['experience']  = kumari['experience'].fillna('N/A')
     kumari_clean['education']   = kumari['education'].fillna('N/A')
     return kumari_clean
+
 
 
 # ══════════════════════════════════════════════════════════════

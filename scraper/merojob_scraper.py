@@ -11,7 +11,7 @@ import os
 from datetime import datetime
 
 # Import our central database module
-from database import save_merojob_data
+from cleaner.database import save_merojob_data
 
 
 def scrape_jobs():

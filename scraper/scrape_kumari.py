@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 
 # Import our central database module
-from database import save_kumari_data
+from cleaner.database import save_kumari_data
 
 
 def scrape_kumari_jobs():
