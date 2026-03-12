@@ -28,33 +28,32 @@ from datetime import datetime
 
 # ── Logging + decorators (Chapter 1 & 4) ─────────────────────
 from logger import get_logger
-from utils  import timer
+from obselete.utils  import timer
 
 logger = get_logger("job_analyzer.scheduler")
 
 # ── Import the other modules ───────────────────────────────────
-from database import setup_database
-
+from cleaner.database import setup_database
 try:
-    from merojob_scraper import scrape_jobs as scrape_mero
+    from scraper.merojob_scraper import scrape_jobs as scrape_mero
 except ImportError as e:
     logger.critical(f"Could not import merojob_scraper: {e}")
     sys.exit(1)
 
 try:
-    from scrape_kumari import scrape_kumari_jobs as scrape_kumari
+    from scraper.scrape_kumari import scrape_kumari_jobs as scrape_kumari
 except ImportError as e:
     logger.critical(f"Could not import scrape_kumari: {e}")
     sys.exit(1)
 
 try:
-    from clean_data import clean_and_merge
+    from cleaner.clean_data import clean_and_merge
 except ImportError as e:
     logger.critical(f"Could not import clean_data: {e}")
     sys.exit(1)
 
 try:
-    from report_generator import generate_all_reports
+    from reportGenerator.report_generator import generate_all_reports
 except ImportError as e:
     logger.warning(f"report_generator not available: {e}")
     generate_all_reports = None
