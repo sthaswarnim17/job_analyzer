@@ -95,14 +95,18 @@ if df.empty:
 st.sidebar.header("🔍 Filter Jobs")
 st.sidebar.markdown("---")
 
-# Source filter
-all_sources = sorted(df['source'].dropna().unique().tolist())
-source_filter = st.sidebar.multiselect(
-    "📡 Data Source",
-    options=all_sources,
-    default=all_sources,
-    help="Choose which website(s) to include"
-)
+# Source filter — handle empty source column gracefully
+all_sources = sorted(df['source'].dropna().replace('', pd.NA).dropna().unique().tolist())
+if all_sources:
+    source_filter = st.sidebar.multiselect(
+        "📡 Data Source",
+        options=all_sources,
+        default=all_sources,
+        help="Choose which website(s) to include"
+    )
+else:
+    source_filter = []
+    st.sidebar.caption("📡 Data Source: All sources")
 
 # Category filter (show top 30 most common)
 top_cats = df['category'].value_counts().head(30).index.tolist()
@@ -114,7 +118,7 @@ category_filter = st.sidebar.multiselect(
 )
 
 # Job Level filter
-all_levels = sorted(df['job_level'].dropna().unique().tolist())
+all_levels = sorted(df['job_level'].dropna().replace('', pd.NA).dropna().unique().tolist())
 level_filter = st.sidebar.multiselect(
     "📊 Job Level",
     options=all_levels,
@@ -123,13 +127,39 @@ level_filter = st.sidebar.multiselect(
 )
 
 # Location filter
-top_locs = df[df['location'] != 'Unknown']['location'].value_counts().head(15).index.tolist()
+top_locs = df[
+    df['location'].notna() & 
+    ~df['location'].isin(['Unknown', '', 'N/A'])
+]['location'].value_counts().head(15).index.tolist()
 loc_filter = st.sidebar.multiselect(
     "📍 Location",
     options=top_locs,
     default=[],
     help="Leave empty to show all cities"
 )
+
+# Salary range slider
+sal_data = df['salary_min'].dropna()
+sal_data = sal_data[(sal_data > 0) & (sal_data < 500_000)]
+if len(sal_data) > 0:
+    sal_min_val = int(sal_data.min())
+    sal_max_val = int(sal_data.max())
+    salary_range = st.sidebar.slider(
+        "💰 Min Salary Range (NPR)",
+        min_value=sal_min_val,
+        max_value=sal_max_val,
+        value=(sal_min_val, sal_max_val),
+        step=5000,
+        help="Filter by minimum salary"
+    )
+else:
+    salary_range = None
+
+st.sidebar.markdown("---")
+# Reset Filters button
+if st.sidebar.button("🔄 Reset All Filters", use_container_width=True):
+    st.cache_data.clear()
+    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**About this project:**")
@@ -153,6 +183,13 @@ if level_filter:
     filtered = filtered[filtered['job_level'].isin(level_filter)]
 if loc_filter:
     filtered = filtered[filtered['location'].isin(loc_filter)]
+if salary_range:
+    sal_lo, sal_hi = salary_range
+    sal_mask = (
+        filtered['salary_min'].isna() |
+        ((filtered['salary_min'] >= sal_lo) & (filtered['salary_min'] <= sal_hi))
+    )
+    filtered = filtered[sal_mask]
 
 # ══════════════════════════════════════════════════════════════
 #  KPI METRICS  (top row of numbers)
@@ -197,11 +234,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Glassy grey line above Job Distribution
-st.markdown("""
-<div class='glassy-grey-line'></div>
-""", unsafe_allow_html=True)
-
 st.markdown("---")
 
 # ══════════════════════════════════════════════════════════════
@@ -209,6 +241,7 @@ st.markdown("---")
 # ══════════════════════════════════════════════════════════════
 
 st.markdown("### 📊 Advanced Statistical Analysis & EDA")
+st.caption("Expand the tabs below for detailed analyst-level insights.")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📈 Statistical Summary", 
@@ -561,11 +594,6 @@ with tab5:
     else:
         st.info("Timestamp data not available in the dataset.")
 
-# Glassy grey line below Advanced EDA section
-st.markdown("""
-<div class='glassy-grey-line'></div>
-""", unsafe_allow_html=True)
-
 st.markdown("---")
 
 # ══════════════════════════════════════════════════════════════
@@ -692,6 +720,58 @@ else:
     )
 
 # ══════════════════════════════════════════════════════════════
+#  TOP COMPANIES HIRING
+# ══════════════════════════════════════════════════════════════
+
+st.markdown("### 🏢 Top Companies Hiring")
+top_companies_col1, top_companies_col2 = st.columns(2)
+
+with top_companies_col1:
+    top_co = filtered['company'].value_counts().head(15)
+    if len(top_co) > 0:
+        fig = px.bar(
+            x=top_co.values,
+            y=top_co.index,
+            orientation='h',
+            title="Top 15 Companies by Open Positions",
+            color=top_co.values,
+            color_continuous_scale='Tealgrn',
+            labels={'x': 'Number of Openings', 'y': 'Company'},
+            text=top_co.values
+        )
+        fig.update_traces(textposition='outside')
+        fig.update_layout(showlegend=False, height=450, margin=dict(l=0, r=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+with top_companies_col2:
+    # Companies by median salary
+    co_salary = (
+        filtered[filtered['salary_min'].notna() & (filtered['salary_min'] > 0)]
+        .groupby('company')['salary_min']
+        .agg(['median', 'count'])
+        .reset_index()
+    )
+    co_salary.columns = ['Company', 'Median Salary', 'Job Count']
+    co_salary = co_salary[co_salary['Job Count'] >= 2].sort_values('Median Salary', ascending=False).head(12)
+    if len(co_salary) > 0:
+        fig = px.bar(
+            co_salary,
+            x='Median Salary',
+            y='Company',
+            orientation='h',
+            title="Top Companies by Median Salary Offered",
+            color='Median Salary',
+            color_continuous_scale='Plasma',
+            hover_data=['Job Count'],
+            text=co_salary['Median Salary'].apply(lambda x: f"NPR {x:,.0f}")
+        )
+        fig.update_traces(textposition='outside')
+        fig.update_layout(showlegend=False, height=450, margin=dict(l=0, r=0))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Not enough salary data to rank companies by pay.")
+
+# ══════════════════════════════════════════════════════════════
 #  JOB LISTINGS TABLE  (searchable)
 # ══════════════════════════════════════════════════════════════
 
@@ -717,19 +797,24 @@ show_cols = ['title', 'company', 'location', 'category', 'job_level',
              'salary_min', 'salary_max', 'experience', 'source', 'job_url']
 show_cols = [c for c in show_cols if c in display_df.columns]  # safety check
 
+# Build column_config with clickable URLs if job_url column exists
+col_cfg = {
+    'title':      st.column_config.TextColumn("Job Title"),
+    'company':    st.column_config.TextColumn("Company"),
+    'location':   st.column_config.TextColumn("Location"),
+    'category':   st.column_config.TextColumn("Category"),
+    'job_level':  st.column_config.TextColumn("Level"),
+    'salary_min': st.column_config.NumberColumn("Min Salary (NPR)", format="NPR %,.0f"),
+    'salary_max': st.column_config.NumberColumn("Max Salary (NPR)", format="NPR %,.0f"),
+    'experience': st.column_config.TextColumn("Experience"),
+    'source':     st.column_config.TextColumn("Source"),
+}
+if 'job_url' in display_df.columns:
+    col_cfg['job_url'] = st.column_config.LinkColumn("Apply Link", display_text="🔗 Apply")
+
 st.dataframe(
-    display_df[show_cols].rename(columns={
-        'title': 'Job Title',
-        'company': 'Company',
-        'location': 'Location',
-        'category': 'Category',
-        'job_level': 'Level',
-        'salary_min': 'Min Salary (NPR)',
-        'salary_max': 'Max Salary (NPR)',
-        'experience': 'Experience',
-        'source': 'Source',
-        'job_url': 'Link'
-    }),
+    display_df[show_cols],
+    column_config=col_cfg,
     use_container_width=True,
     height=500
 )
