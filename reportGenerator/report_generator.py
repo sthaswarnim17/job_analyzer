@@ -18,10 +18,15 @@ import os
 import sqlite3
 from datetime import datetime
 
+from collections import Counter
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import seaborn as sns
 import pandas as pd
 
 from logger import get_logger
-
+from .generate_plots import generate_plots
 logger = get_logger("job_analyzer.report")
 
 DB_PATH     = "jobs.db"
@@ -80,9 +85,6 @@ def _build_summary(df: pd.DataFrame) -> dict:
     }
 
 
-# ══════════════════════════════════════════════════════════════
-#  HTML REPORT GENERATOR
-# ══════════════════════════════════════════════════════════════
 
 def generate_html_report(df: pd.DataFrame = None) -> str:
     """
@@ -99,6 +101,7 @@ def generate_html_report(df: pd.DataFrame = None) -> str:
         df = _load_data()
 
     s = _build_summary(df)
+    plots = generate_plots(df)
     date_str  = datetime.now().strftime("%Y%m%d")
     file_name = f"report_{date_str}.html"
     file_path = os.path.join(REPORTS_DIR, file_name)
@@ -305,6 +308,20 @@ def generate_html_report(df: pd.DataFrame = None) -> str:
   </table>
 </div>
 
+<!-- EDA Visualizations -->
+<div class="section">
+  <h2>EDA Visualizations</h2>
+  <div style="display:flex; flex-wrap:wrap; gap: 20px; justify-content: center;">
+    {f'<img src="{plots["categories"]}" style="max-width: 48%; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">' if 'categories' in plots else ''}
+    {f'<img src="{plots["locations"]}" style="max-width: 48%; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">' if 'locations' in plots else ''}
+    {f'<img src="{plots["levels"]}" style="max-width: 48%; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">' if 'levels' in plots else ''}
+    {f'<img src="{plots["salary_dist"]}" style="max-width: 48%; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">' if 'salary_dist' in plots else ''}
+    {f'<img src="{plots["skills"]}" style="max-width: 98%; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">' if 'skills' in plots else ''}
+    {f'<img src="{plots["sources"]}" style="max-width: 48%; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">' if 'sources' in plots else ''}
+    {f'<img src="{plots["salary_box"]}" style="max-width: 98%; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">' if 'salary_box' in plots else ''}
+  </div>
+</div>
+
 <!-- Recent jobs -->
 <div class="section">
   <h2>Most Recently Scraped Listings (Top 20)</h2>
@@ -343,6 +360,7 @@ def generate_excel_report(df: pd.DataFrame = None) -> str:
       Sheet 2 — Category Summary
       Sheet 3 — Location Summary
       Sheet 4 — Salary Statistics
+      Sheet 5 — Top Skills
 
     Args:
         df (pd.DataFrame): Optional pre-loaded dataframe.
@@ -393,6 +411,20 @@ def generate_excel_report(df: pd.DataFrame = None) -> str:
         .reset_index()
     )
 
+    # Sheet 5 — Top Skills (Skills extraction)
+    all_skills = []
+    for skills_str in df['skills'].dropna():
+        if skills_str and skills_str.strip():
+            for skill in skills_str.split(','):
+                skill = skill.strip()
+                if skill and skill.lower() not in ('n/a', 'na', ''):
+                    all_skills.append(skill)
+    if len(all_skills) > 0:
+        skill_summary = pd.Series(Counter(all_skills)).sort_values(ascending=False).head(50).reset_index()
+        skill_summary.columns = ["Skill", "Frequency"]
+    else:
+        skill_summary = pd.DataFrame(columns=["Skill", "Frequency"])
+
     # Export columns for Sheet 1
     export_cols = ["title", "company", "location", "category",
                    "job_level", "salary_min", "salary_max",
@@ -406,6 +438,7 @@ def generate_excel_report(df: pd.DataFrame = None) -> str:
             cat_summary.to_excel(writer, sheet_name="By Category",      index=False)
             loc_summary.to_excel(writer, sheet_name="By Location",      index=False)
             sal_stats.to_excel(  writer, sheet_name="Salary by Level",  index=False)
+            skill_summary.to_excel(writer, sheet_name="Top Skills",     index=False)
 
         logger.info(f"Excel report saved: {os.path.abspath(file_path)}")
         return os.path.abspath(file_path)
